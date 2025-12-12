@@ -1,5 +1,5 @@
 const express = require('express');
-const { ApolloServer } = require('apollo-server-express');
+const { ApolloServer, gql } = require('apollo-server-express');
 const { PubSub } = require('graphql-subscriptions');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
@@ -10,219 +10,167 @@ const pubsub = new PubSub();
 // Enable CORS
 app.use(cors({
   origin: [
-    'http://localhost:3000', // API Gateway
-    'http://localhost:3002', // Frontend
-    'http://api-gateway:3000', // Docker container name
-    'http://frontend-app:3002' // Docker container name
+    'http://localhost:3000',
+    'http://localhost:3002', 
+    'http://api-gateway:3000', 
+    'http://frontend-app:3002' 
   ],
   credentials: true
 }));
 
-// In-memory data store (replace with real database in production)
-let posts = [
+let courses = [
   {
     id: '1',
-    title: 'Welcome to GraphQL',
-    content: 'This is our first GraphQL post with subscriptions!',
-    author: 'GraphQL Team',
-    createdAt: new Date().toISOString(),
+    code: 'IF301',
+    name: 'Pemrograman Web Lanjut',
+    lecturer: 'Pak Budi',
+    day: 'Senin',
+    time: '08:00 - 10:30',
   },
   {
     id: '2',
-    title: 'Real-time Updates',
-    content: 'Watch this space for real-time updates using GraphQL subscriptions.',
-    author: 'Development Team',
-    createdAt: new Date().toISOString(),
+    code: 'IF305',
+    name: 'Sistem Terdistribusi',
+    lecturer: 'Bu Siti',
+    day: 'Rabu',
+    time: '13:00 - 15:30',
   }
 ];
 
-let comments = [
+let assignments = [
   {
     id: '1',
-    postId: '1',
-    content: 'Great introduction to GraphQL!',
-    author: 'John Doe',
-    createdAt: new Date().toISOString(),
+    courseId: '1',
+    title: 'Tugas 1: Microservices',
+    deadline: '2023-12-20',
+    status: 'Pending', 
   }
 ];
 
-// GraphQL type definitions
 const typeDefs = `
-  type Post {
+  type Course {
     id: ID!
-    title: String!
-    content: String!
-    author: String!
-    createdAt: String!
-    comments: [Comment!]!
+    code: String!
+    name: String!
+    lecturer: String!
+    day: String!
+    time: String!
+    assignments: [Assignment]
   }
 
-  type Comment {
+  type Assignment {
     id: ID!
-    postId: ID!
-    content: String!
-    author: String!
-    createdAt: String!
+    courseId: ID!
+    title: String!
+    deadline: String!
+    status: String!
+    course: Course
   }
 
   type Query {
-    posts: [Post!]!
-    post(id: ID!): Post
-    comments(postId: ID!): [Comment!]!
+    courses: [Course!]!
+    course(id: ID!): Course
+    assignments(courseId: ID): [Assignment!]!
   }
 
   type Mutation {
-    createPost(title: String!, content: String!, author: String!): Post!
-    updatePost(id: ID!, title: String, content: String): Post!
-    deletePost(id: ID!): Boolean!
-    createComment(postId: ID!, content: String!, author: String!): Comment!
-    deleteComment(id: ID!): Boolean!
+    addCourse(code: String!, name: String!, lecturer: String!, day: String!, time: String!): Course!
+    
+    addAssignment(courseId: ID!, title: String!, deadline: String!): Assignment!
+    
+    updateAssignmentStatus(id: ID!, status: String!): Assignment!
+    
+    deleteAssignment(id: ID!): Boolean!
   }
 
   type Subscription {
-    postAdded: Post!
-    commentAdded: Comment!
-    postUpdated: Post!
-    postDeleted: ID!
+    assignmentAdded: Assignment!
   }
 `;
 
-// GraphQL resolvers
 const resolvers = {
   Query: {
-    posts: () => posts,
-    post: (_, { id }) => posts.find(post => post.id === id),
-    comments: (_, { postId }) => comments.filter(comment => comment.postId === postId),
+    courses: () => courses,
+    course: (_, { id }) => courses.find(c => c.id === id),
+    assignments: (_, { courseId }) => {
+      if (courseId) return assignments.filter(a => a.courseId === courseId);
+      return assignments;
+    },
   },
 
-  Post: {
-    comments: (parent) => comments.filter(comment => comment.postId === parent.id),
+  Course: {
+    assignments: (parent) => assignments.filter(a => a.courseId === parent.id),
+  },
+
+  Assignment: {
+    course: (parent) => courses.find(c => c.id === parent.courseId),
   },
 
   Mutation: {
-    createPost: (_, { title, content, author }) => {
-      const newPost = {
+    addCourse: (_, { code, name, lecturer, day, time }) => {
+      const newCourse = {
         id: uuidv4(),
+        code,
+        name,
+        lecturer,
+        day,
+        time,
+      };
+      courses.push(newCourse);
+      return newCourse;
+    },
+
+    addAssignment: (_, { courseId, title, deadline }) => {
+      // Validasi: Pastikan course ada
+      const courseExists = courses.find(c => c.id === courseId);
+      if (!courseExists) {
+        throw new Error('Mata kuliah tidak ditemukan!');
+      }
+
+      const newAssignment = {
+        id: uuidv4(),
+        courseId,
         title,
-        content,
-        author,
-        createdAt: new Date().toISOString(),
+        deadline,
+        status: 'Pending',
       };
-      posts.push(newPost);
+      assignments.push(newAssignment);
       
-      // Publish to subscribers
-      pubsub.publish('POST_ADDED', { postAdded: newPost });
+      // Publish notifikasi real-time
+      pubsub.publish('ASSIGNMENT_ADDED', { assignmentAdded: newAssignment });
       
-      return newPost;
+      return newAssignment;
     },
 
-    updatePost: (_, { id, title, content }) => {
-      const postIndex = posts.findIndex(post => post.id === id);
-      if (postIndex === -1) {
-        throw new Error('Post not found');
-      }
-
-      const updatedPost = {
-        ...posts[postIndex],
-        ...(title && { title }),
-        ...(content && { content }),
-      };
-
-      posts[postIndex] = updatedPost;
+    updateAssignmentStatus: (_, { id, status }) => {
+      const idx = assignments.findIndex(a => a.id === id);
+      if (idx === -1) throw new Error('Tugas tidak ditemukan');
       
-      // Publish to subscribers
-      pubsub.publish('POST_UPDATED', { postUpdated: updatedPost });
-      
-      return updatedPost;
+      assignments[idx].status = status;
+      return assignments[idx];
     },
 
-    deletePost: (_, { id }) => {
-      const postIndex = posts.findIndex(post => post.id === id);
-      if (postIndex === -1) {
-        return false;
-      }
+    deleteAssignment: (_, { id }) => {
+      const idx = assignments.findIndex(a => a.id === id);
+      if (idx === -1) return false;
 
-      // Remove associated comments
-      comments = comments.filter(comment => comment.postId !== id);
-      
-      // Remove post
-      posts.splice(postIndex, 1);
-      
-      // Publish to subscribers
-      pubsub.publish('POST_DELETED', { postDeleted: id });
-      
-      return true;
-    },
-
-    createComment: (_, { postId, content, author }) => {
-      const post = posts.find(p => p.id === postId);
-      if (!post) {
-        throw new Error('Post not found');
-      }
-
-      const newComment = {
-        id: uuidv4(),
-        postId,
-        content,
-        author,
-        createdAt: new Date().toISOString(),
-      };
-      
-      comments.push(newComment);
-      
-      // Publish to subscribers
-      pubsub.publish('COMMENT_ADDED', { commentAdded: newComment });
-      
-      return newComment;
-    },
-
-    deleteComment: (_, { id }) => {
-      const commentIndex = comments.findIndex(comment => comment.id === id);
-      if (commentIndex === -1) {
-        return false;
-      }
-
-      comments.splice(commentIndex, 1);
+      assignments.splice(idx, 1);
       return true;
     },
   },
 
   Subscription: {
-    postAdded: {
-      subscribe: () => pubsub.asyncIterator(['POST_ADDED']),
-    },
-    commentAdded: {
-      subscribe: () => pubsub.asyncIterator(['COMMENT_ADDED']),
-    },
-    postUpdated: {
-      subscribe: () => pubsub.asyncIterator(['POST_UPDATED']),
-    },
-    postDeleted: {
-      subscribe: () => pubsub.asyncIterator(['POST_DELETED']),
+    assignmentAdded: {
+      subscribe: () => pubsub.asyncIterator(['ASSIGNMENT_ADDED']),
     },
   },
 };
 
 async function startServer() {
-  // Create Apollo Server
   const server = new ApolloServer({
     typeDefs,
     resolvers,
-    context: ({ req }) => {
-      // Add authentication logic here if needed
-      return { req };
-    },
-    plugins: [
-      {
-        requestDidStart() {
-          return {
-            willSendResponse(requestContext) {
-              console.log(`GraphQL ${requestContext.request.operationName || 'Anonymous'} operation completed`);
-            },
-          };
-        },
-      },
-    ],
+    context: ({ req }) => ({ req }),
   });
 
   await server.start();
@@ -231,16 +179,13 @@ async function startServer() {
   const PORT = process.env.PORT || 4000;
   
   const httpServer = app.listen(PORT, () => {
-    console.log(`🚀 GraphQL API Server running on port ${PORT}`);
-    console.log(`🔗 GraphQL endpoint: http://localhost:${PORT}${server.graphqlPath}`);
-    console.log(`📊 GraphQL Playground: http://localhost:${PORT}${server.graphqlPath}`);
-    console.log(`📡 Subscriptions ready`);
+    console.log(`🚀 GraphQL API Server (KuliahMate) running on port ${PORT}`);
+    console.log(`📡 GraphQL endpoint: http://localhost:${PORT}${server.graphqlPath}`);
+    console.log(`🔔 Subscriptions ready`);
   });
 
-  // Setup subscriptions
   server.installSubscriptionHandlers(httpServer);
 
-  // Graceful shutdown
   process.on('SIGTERM', () => {
     console.log('SIGTERM received, shutting down gracefully');
     httpServer.close(() => {
@@ -249,20 +194,18 @@ async function startServer() {
   });
 }
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
-    service: 'graphql-api',
+    service: 'graphql-api-kuliahmate',
     timestamp: new Date().toISOString(),
     data: {
-      posts: posts.length,
-      comments: comments.length
+      coursesCount: courses.length,
+      assignmentsCount: assignments.length
     }
   });
 });
 
-// Error handling
 app.use((err, req, res, next) => {
   console.error('GraphQL API Error:', err);
   res.status(500).json({ 

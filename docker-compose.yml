@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # REST API Service
   rest-api:
     build: ./services/rest-api
     ports:
@@ -12,10 +11,10 @@ services:
     volumes:
       - ./services/rest-api:/app
       - /app/node_modules
+    command: npm run dev
     networks:
       - microservices-network
 
-  # GraphQL API Service
   graphql-api:
     build: ./services/graphql-api
     ports:
@@ -26,10 +25,10 @@ services:
     volumes:
       - ./services/graphql-api:/app
       - /app/node_modules
+    command: npm run dev
     networks:
       - microservices-network
 
-  # API Gateway
   api-gateway:
     build: ./api-gateway
     ports:
@@ -45,14 +44,14 @@ services:
     volumes:
       - ./api-gateway:/app
       - /app/node_modules
+    command: npm run dev
     networks:
       - microservices-network
 
-  # Frontend Application
   frontend-app:
-    build:
+    build: 
       context: ./frontend-app
-      target: runner
+      target: deps
     ports:
       - "3002:3000"
     environment:
@@ -60,6 +59,11 @@ services:
       - NEXT_PUBLIC_GRAPHQL_URL=http://localhost:4000/graphql
     depends_on:
       - api-gateway
+    volumes:
+      - ./frontend-app:/app
+      - /app/node_modules
+      - /app/.next
+    command: npm run dev
     networks:
       - microservices-network
 
